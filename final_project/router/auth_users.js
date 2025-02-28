@@ -1,50 +1,87 @@
-const express = require('express');
-const jwt = require('jsonwebtoken');
-let books = require("./booksdb.js");
-const regd_users = express.Router();
+const books = require('./booksdb.js')
+const jwt = require('jsonwebtoken')
+const express = require('express')
 
-let users = [{ username: "oswa3185", password: "bsc34890" }];
+const regd_users = express.Router()
 
-const isValid = (username)=>{ //returns boolean
-  return !users.some(user => user.username === username);
+const users = []
+const SECRET_KEY = 'fingerprint_customer'
+
+const isValid = (username) => {
+  return users.some((users) => users.username === username)
 }
 
-const authenticatedUser = (username,password)=>{ //returns boolean
-//write code to check if username and password match the one we have in records.
-  return users.some(user => user.username === username && user.password === password);
+const authenticatedUser = (username, password) => {
+  const user = users.find((users) => users.username === username)
+  return user && user.password === password
 }
 
-//only registered users can login
-regd_users.post("/login", (req,res) => {
-  //Write your code here
-  console.log(req.body)
+regd_users.post('/login', (req, res) => {
+  const { username, password } = req.body
 
-  let username = req.body.username;
-  let password = req.body.password;
-  if(username && password){
-    if(authenticatedUser(username,password)){
-      //create a JWT token
-
-      let token = jwt.sign({username:username}, 'my-secret-key', { expiresIn: '1h' });
-      req.session.authorization = {
-        token, username
-      }
-      return res.status(200).json({message: "User logged in successfully", token: token});
-    }
-    else{
-      return res.status(400).json({message: "Username or password is incorrect"});
-    }
+  if (!isValid(username) || !authenticatedUser(username, password)) {
+    return res.status(401).json({ message: 'Invalid username or password' })
   }
-  return res.status(300).json({message: "Yet to be implemented"});
 
-});
+  const token = jwt.sign({ username }, SECRET_KEY, { expiresIn: '1h' })
+  users.find((u) => u.username === username).token = token
+  console.log(users)
+  return res.status(200).json({message: "User logged in successfully", token: token})
+})
 
-// Add a book review
-regd_users.put("/auth/review/:isbn", (req, res) => {
-  //Write your code here
-  return res.status(300).json({message: "Yet to be implemented"});
-});
+regd_users.put('/auth/review/:isbn', (req, res) => {
+  const { isbn } = req.params
+  const { review } = req.body
+  const authHeader = req.header('Authorization')
 
-module.exports.authenticated = regd_users;
-module.exports.isValid = isValid;
-module.exports.users = users;
+  if (!authHeader) {
+    return res.status(401).json({ message: 'Authorization header missing' })
+  }
+
+  const token = authHeader.replace('Bearer ', '')
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY)
+    const username = decoded.username
+
+    if (!books[isbn]) {
+      return res.status(404).json({ message: 'Book not found' })
+    }
+
+    if (!books[isbn].reviews) {
+      books[isbn].reviews = {}
+    }
+
+    books[isbn].reviews[username] = review
+    return res.status(200).json({ message: 'Review added successfully' })
+  } catch (error) {
+    return res.status(400).json({ message: 'Invalid token' })
+  }
+})
+
+
+regd_users.delete('/auth/review/:isbn', (req, res) => {
+  const { isbn } = req.params
+  const token = req.headers.authorization?.split(' ')[1]
+
+  if (!token) return res.status(401).json({ message: 'Unauthorized' })
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY)
+    const username = decoded.username
+
+    if (!books[isbn] || !books[isbn].reviews || !books[isbn].reviews[username]) {
+      return res.status(404).json({ message: 'Review not found' })
+    }
+
+    delete books[isbn].reviews[username]
+    return res.status(200).json({ message: 'Review deleted successfully' })
+  } catch (error) {
+    return res.status(401).json({ message: 'Invalid token' })
+  }
+})
+
+
+module.exports.authenticated = regd_users
+module.exports.isValid = isValid
+module.exports.users = users
